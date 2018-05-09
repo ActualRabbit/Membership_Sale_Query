@@ -1,0 +1,90 @@
+WITH 
+member_data AS
+(
+select a.mm_number mm_number, 
+d.mt_desc as "Type",
+b.mr_first_name||' '||b.mr_last_name as "Name", 
+trunc((to_number(to_char(sysdate,'yyyymmdd'))-to_number(to_char(b.mr_birth_date,'yyyymmdd')))/10000) as "Age",
+trunc((to_number(to_char(sysdate,'yyyymmdd'))-to_number(to_char(mm_since_date,'yyyymmdd')))/10000) as "Mem_Duration",
+b.mr_email as "Email",
+b.mr_phone as "Phone",
+rtrim(b.mr_address1||' '||b.mr_address2||' '||b.mr_address3) as "Address",
+b.mr_city as "City",
+c.PV_CODE as "Province",
+b.mr_postal_code as "Postal Code",
+CASE c.PV_CODE WHEN null then 'N/A' ELSE 'CANADA' END as "Country",
+decode(b.mr_current_address_YN_ID,'1','Y','0','N','N') "Correct Address",
+substr(ltrim(b.mr_postal_code),1,3) as "3POSTAL"
+from mw_membership a, mw_member b, mw_province c, mw_membership_type d
+where 
+a.mm_id = b.mr_mm_id
+and a.mm_mt_id = d.mt_id
+and b.mr_pv_id = c.pv_id
+),
+Most_visited AS
+(
+select mm_number, cn from (
+select mm_number, cn, visits, rnk from (
+select a.pu_mm_number  mm_number, b.cn_number cn, count(*) as visits, dense_rank () over
+(PARTITION BY a.pu_mm_number order by count(*) desc, max(rownum) desc) as rnk
+from mw_purchase a, com_centre b
+where a.pu_date between to_date('2014-11-02' , 'yyyy-mm-dd') and to_date('2015-10-31' , 'yyyy-mm-dd') 
+and a.pu_cn_id = b.cn_id
+--and a.pu_mm_number < 1000
+and a.pu_amt > 0
+group by 
+a.pu_mm_number, b.cn_number
+)
+where rnk = 1
+)
+),
+commodity_sum AS
+(
+select 
+mm_number, 
+sum(nvl(cn_food,0))+sum(nvl(cn_liquor,0))+sum(nvl(cn_fuel_amount,0))+sum(nvl(cn_sundry,0)) as "Total Purchase",
+sum(nvl(cn_food,0)) as "Food Total",
+sum(nvl(cn_liquor,0)) as "Liquor Total",
+sum(nvl(cn_fuel_amount,0)) as "Fuel Total",
+sum(nvl(cn_fuel_lite,0)) as "Fuel L Total",
+sum(nvl(cn_sundry,0)) as "Sundry Total"
+from mw_cn_gis_data
+group by mm_number
+),
+breakdown AS
+(select * from
+(
+select mm_number, cn_food, cn_liquor, cn_fuel_amount, cn_fuel_lite, cn_sundry, cn 
+from mw_cn_gis_data
+)
+pivot
+(
+sum(nvl(cn_food,0)) as food, sum(nvl(cn_liquor,0)) as liquor, sum(nvl(cn_fuel_amount,0)) as fuel, sum(nvl(cn_fuel_lite,0)) as fuel_litres, sum(nvl(cn_sundry,0)) as sundry
+for (cn) 
+in ('1' as "#1",'2' as "#2",'3' as "#3", '4' as "#4",'5' as "#5",'6' as "#6",'7' as "#7",'8' as "#8",'9' as "#9",'10' as "#10",
+'11' as "#11",'12' as "#12",'13' as "#13",'14' as "#14",'15' as "#15",'16' as "#16",'17' as "#17",'18' as "#18",'19' as "#19",'20' as "#20",
+'21' as "#21",'22' as "#22",'23' as "#23",'24' as "#24",'25' as "#25",'26' as "#26",'30' as "#30",'31' as "#31",'32' as "#32",'33' as "#33",
+'34' as "#34",'35' as "#35",'37' as "#37",'39' as "#39",'40' as "#40",'41' as "#41",'43' as "#43",'71' as "#71",'78' as "#78",'90' as "#90"
+))
+)
+SELECT
+member_data.*,
+Most_visited.cn as "Most Visited Centre",
+commodity_sum."Total Purchase",
+commodity_sum."Food Total",
+commodity_sum."Liquor Total",
+commodity_sum."Fuel Total",
+commodity_sum."Fuel L Total",
+commodity_sum."Sundry Total",
+breakdown.*
+FROM
+member_data,
+Most_visited,
+commodity_sum,
+breakdown
+where
+member_data.mm_number = Most_visited.mm_number
+and Most_visited.mm_number = commodity_sum.mm_number
+and commodity_sum.mm_number = breakdown.mm_number
+order by
+member_data.mm_number

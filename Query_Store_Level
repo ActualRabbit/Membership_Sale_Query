@@ -1,0 +1,168 @@
+WITH 
+member_data AS
+(
+select a.mm_number mm_number, 
+d.mt_desc as "Type",
+b.mr_first_name||' '||b.mr_last_name as "Name", 
+trunc((to_number(to_char(sysdate,'yyyymmdd'))-to_number(to_char(b.mr_birth_date,'yyyymmdd')))/10000) as "Age",
+trunc((to_number(to_char(sysdate,'yyyymmdd'))-to_number(to_char(mm_since_date,'yyyymmdd')))/10000) as "Mem_Duration",
+b.mr_email as "Email",
+b.mr_phone as "Phone",
+rtrim(b.mr_address1||' '||b.mr_address2||' '||b.mr_address3) as "Address",
+b.mr_city as "City",
+c.PV_CODE as "Province",
+b.mr_postal_code as "Postal Code",
+CASE c.PV_CODE WHEN null then 'N/A' ELSE 'CANADA' END as "Country",
+decode(b.mr_current_address_YN_ID,'1','Y','0','N','N') "Correct Address",
+substr(ltrim(b.mr_postal_code),1,3) as "3POSTAL"
+from mw_membership a, mw_member b, mw_province c, mw_membership_type d
+where 
+a.mm_id = b.mr_mm_id
+and a.mm_mt_id = d.mt_id
+and b.mr_pv_id = c.pv_id
+),
+Visits AS
+(
+select a.pu_mm_number  mm_number, count(*) as visits
+from mw_purchase a, com_centre b
+where
+a.pu_date between to_date('2014-08-06' , 'yyyy-mm-dd') and to_date('2016-07-25' , 'yyyy-mm-dd') 
+and a.pu_cn_id = b.cn_id
+and a.pu_amt > 0
+group by 
+a.pu_mm_number
+),
+Most_visited AS
+(
+select mm_number, cn, visits from (
+select mm_number, cn, visits, rnk from (
+select a.pu_mm_number  mm_number, b.cn_number cn, count(*) as visits, dense_rank () over
+(PARTITION BY a.pu_mm_number order by count(*) desc, max(rownum) desc) as rnk
+from mw_purchase a, com_centre b
+where 
+a.pu_date between to_date('2014-08-06' , 'yyyy-mm-dd') and to_date('2016-07-25' , 'yyyy-mm-dd') 
+and a.pu_cn_id = b.cn_id
+--and a.pu_mm_number < 1000
+and a.pu_amt > 0
+group by 
+a.pu_mm_number, b.cn_number
+)
+where rnk = 1
+)
+),
+P1_commodity_sum AS
+(
+select pu_mm_number membership,
+round((sum(decode(pc_desc,'Food Centre',nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))+(sum(decode(pc_desc,'Pharmacy',nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))),0) P1_Grocery,
+round(sum(decode(pc_desc, 'Liquor', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) P1_Liquor,
+round(sum(decode(pc_desc, 'Fuel', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) P1_fuel
+from 
+mw_purchase, com_centre, mw_purchase_class
+where pu_amt> 0
+and pu_cn_id =cn_id 
+and pu_pc_id = pc_id 
+and pu_rs_id =1 
+and pu_pc_id in (3, 4, 8, 10)
+and pu_date between to_date('2014-08-06', 'yyyy-mm-dd') and to_date ('2015-07-31', 'yyyy-mm-dd')
+group by pu_mm_number
+),
+P2_commodity_sum AS
+(
+select pu_mm_number membership,
+round((sum(decode(pc_desc,'Food Centre',nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))+(sum(decode(pc_desc,'Pharmacy',nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))),0) P2_Grocery,
+round(sum(decode(pc_desc, 'Liquor', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) P2_Liquor,
+round(sum(decode(pc_desc, 'Fuel', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) P2_fuel
+from 
+mw_purchase, com_centre, mw_purchase_class
+where pu_amt> 0
+and pu_cn_id =cn_id 
+and pu_pc_id = pc_id 
+and pu_rs_id =1 
+and pu_pc_id in (3, 4, 8, 10)
+and pu_date between to_date('2015-08-01', 'yyyy-mm-dd') and to_date ('2016-07-25', 'yyyy-mm-dd')
+group by pu_mm_number
+),
+P1_breakdown AS
+(select * from (
+select pu_mm_number membership, cn_number cn, 
+(round(sum(decode(pc_desc, 'Food Centre', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))  + round(sum(decode(pc_desc, 'Pharmacy', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))) cn_grocery,
+round(sum(decode(pc_desc, 'Liquor', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) cn_Liquor,
+round(sum(decode(pc_desc, 'Fuel', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) cn_fuel
+from 
+mw_purchase, com_centre, mw_purchase_class
+where pu_amt> 0
+and pu_cn_id =cn_id 
+and pu_pc_id = pc_id 
+and pu_rs_id =1 
+and pu_pc_id in (3, 4, 8, 10)
+and pu_date between to_date('2014-08-06', 'yyyy-mm-dd') and to_date ('2015-07-31', 'yyyy-mm-dd')
+group by pu_mm_number, cn_number
+)
+pivot
+(
+sum(nvl(cn_grocery,0)) as grocery,
+sum(nvl(cn_liquor,0)) as liquor,
+sum(nvl(cn_fuel,0)) as fuel 
+for (cn) in ('1' as "P1_#1",'2' as "P1_#2",'3' as "P1_#3", '4' as "P1_#4",'5' as "P1_#5",'6' as "P1_#6",'7' as "P1_#7",'8' as "P1_#8",'9' as "P1_#9",'10' as "P1_#10",
+'11' as "P1_#11",'12' as "P1_#12",'13' as "P1_#13",'14' as "P1_#14",'15' as "P1_#15",'16' as "P1_#16",'17' as "P1_#17",'18' as "P1_#18",'19' as "P1_#19",'20' as "P1_#20",
+'21' as "P1_#21",'22' as "P1_#22",'23' as "P1_#23",'24' as "P1_#24",'25' as "P1_#25",'26' as "P1_#26", '27' as "P1_#27", '30' as "P1_#30",'31' as "P1_#31",'32' as "P1_#32",'33' as "P1_#33",
+'34' as "P1_#34",'35' as "P1_#35", '36' as "P1_#36", '37' as "P1_#37",'38' as "P1_#38",'39' as "P1_#39",'40' as "P1_#40",'41' as "P1_#41",'42' as "P1_#42",'43' as "P1_#43",'44' as "P1_#44",
+'45' as "P1_#45",'46' as "P1_#46",'47' as "P1_#47",'48' as "P1_#48",'49' as "P1_#49",'71' as "P1_#71",'78' as "P1_#78",'82' as "P1_#82")
+)),
+P2_breakdown AS
+(select * from (
+select pu_mm_number membership, cn_number cn, 
+(round(sum(decode(pc_desc, 'Food Centre', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))  + round(sum(decode(pc_desc, 'Pharmacy', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0)))) cn_grocery,
+round(sum(decode(pc_desc, 'Liquor', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) cn_Liquor,
+round(sum(decode(pc_desc, 'Fuel', nvl(pu_amt,0)+nvl(pu_gst_amt,0),0))) cn_fuel
+from 
+mw_purchase, com_centre, mw_purchase_class
+where pu_amt> 0
+and pu_cn_id =cn_id 
+and pu_pc_id = pc_id 
+and pu_rs_id =1 
+and pu_pc_id in (3, 4, 8, 10)
+and pu_date between to_date('2015-08-01', 'yyyy-mm-dd') and to_date ('2016-07-25', 'yyyy-mm-dd')
+group by pu_mm_number, cn_number
+)
+pivot
+(
+sum(nvl(cn_grocery,0)) as grocery,
+sum(nvl(cn_liquor,0)) as liquor,
+sum(nvl(cn_fuel,0)) as fuel 
+for (cn) in ('1' as "P1_#1",'2' as "P1_#2",'3' as "P1_#3", '4' as "P1_#4",'5' as "P1_#5",'6' as "P1_#6",'7' as "P1_#7",'8' as "P1_#8",'9' as "P1_#9",'10' as "P1_#10",
+'11' as "P1_#11",'12' as "P1_#12",'13' as "P1_#13",'14' as "P1_#14",'15' as "P1_#15",'16' as "P1_#16",'17' as "P1_#17",'18' as "P1_#18",'19' as "P1_#19",'20' as "P1_#20",
+'21' as "P1_#21",'22' as "P1_#22",'23' as "P1_#23",'24' as "P1_#24",'25' as "P1_#25",'26' as "P1_#26", '27' as "P1_#27", '30' as "P1_#30",'31' as "P1_#31",'32' as "P1_#32",'33' as "P1_#33",
+'34' as "P1_#34",'35' as "P1_#35", '36' as "P1_#36", '37' as "P1_#37",'38' as "P1_#38",'39' as "P1_#39",'40' as "P1_#40",'41' as "P1_#41",'42' as "P1_#42",'43' as "P1_#43",'44' as "P1_#44",
+'45' as "P1_#45",'46' as "P1_#46",'47' as "P1_#47",'48' as "P1_#48",'49' as "P1_#49",'71' as "P1_#71",'78' as "P1_#78",'82' as "P1_#82")
+))
+SELECT
+member_data.*,
+Visits.visits as "Total # of Visits",
+Most_visited.cn as "Most Visited Centre",
+Most_visited.visits as "Most Visited Centre Visits",
+P1_commodity_sum.p1_grocery as "P1 Grocery",
+P2_commodity_sum.p2_grocery as "P2 Grocery",
+P1_commodity_sum.p1_liquor as "P1 Liquor",
+P2_commodity_sum.p2_liquor as "P2 Liquor",
+P1_commodity_sum.p1_fuel as "P1 Fuel",
+P2_commodity_sum.p2_fuel as "P2 Fuel",
+p1_breakdown.*,
+p2_breakdown.*
+FROM
+member_data,
+visits,
+Most_visited,
+p1_commodity_sum,
+p2_commodity_sum,
+p1_breakdown,
+p2_breakdown
+where
+member_data.mm_number = visits.mm_number
+and member_data.mm_number = Most_visited.mm_number
+and Most_visited.mm_number = p1_commodity_sum.membership
+and Most_visited.mm_number = p2_commodity_sum.membership
+and Most_visited.mm_number = p1_breakdown.membership
+and Most_visited.mm_number = p2_breakdown.membership
+order by
+member_data.mm_number
